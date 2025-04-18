@@ -1,1 +1,93 @@
 
+import pandas as pd
+import json
+import requests
+import re
+
+
+def safe_extract_category_span(text):
+    if not text:
+        return {}
+    try:
+        return json.loads(text)
+    except:
+        pass
+    match = re.search(r"\{.*\}", text, re.DOTALL)
+    if match:
+        raw = match.group(0)
+        fixed = re.sub(r"([\{\s,])(\w[\w\-\s]*)\s*:", r'\1"\2":', raw)
+        fixed = re.sub(r':\s*([^"{\[\]\},\n]+)', lambda m: f': "{m.group(1).strip()}"', fixed)
+        try:
+            return json.loads(fixed)
+        except:
+            pass
+    return {}
+
+# ------------------------
+# Result Formatting
+# ------------------------
+def flatten_result_to_cols(parsed):
+    if not parsed or parsed == {} or 'none' in parsed:
+        return "", ""
+    categories, spans = [], []
+    for cat, span in parsed.items():
+        if cat != "none" and cat.strip():
+            categories.append(cat.strip())
+            spans.append(span.strip())
+    return ", ".join(categories), " | ".join(spans)
+
+# ------------------------
+#  Process DataFrame
+# ------------------------
+all_results = []
+new_categories = set()
+
+for idx, row in df.iterrows():
+    claim_id = row['claim_id']
+    claim_text = row['claim_text']
+
+    prompt = format_prompt(claim_text, category_list)
+    try:
+        response = call_llama(prompt)
+        parsed = safe_extract_category_span(response)
+
+        # Track new categories
+        for cat in parsed:
+            if cat not in category_list and cat != "none":
+                new_categories.add(cat)
+
+        cat_str, span_str = flatten_result_to_cols(parsed)
+
+        all_results.append({
+            "claim_id": claim_id,
+            "claim_text": claim_text,
+            "llama_raw": response,
+            "categories": cat_str,
+            "extracted_spans": span_str
+        })
+
+    except Exception as e:
+        print(f"❌ Error on claim {claim_id}: {e}")
+        all_results.append({
+            "claim_id": claim_id,
+            "claim_text": claim_text,
+            "llama_raw": str(e),
+            "categories": "",
+            "extracted_spans": ""
+        })
+
+# ------------------------
+# Create Final DataFrame
+# ------------------------
+df_results = pd.DataFrame(all_results)
+
+# Update category list
+if new_categories:
+    print(f"\n🆕 New categories found: {new_categories}")
+    category_list.extend(sorted(new_categories))
+
+print("\n✅ Updated Category List:")
+print(category_list)
+
+# Show the enriched DataFrame
+df_results.head()
